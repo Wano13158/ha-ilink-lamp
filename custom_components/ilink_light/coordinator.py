@@ -180,17 +180,28 @@ class LightCoordinator(DataUpdateCoordinator):
 
         self.data[LightState.POWER] = True
 
-        # Check if user requested white via RGB color picker
-        if rgb is not None and is_white_color(rgb):
+        # The white swatch in HA's RGB picker is an RGB command, not a colour
+        # temperature request.  Sending 0809 here makes some iLink firmware
+        # cycle through its built-in white presets on every tap.  Send the
+        # direct RGB frame instead, which sets all three channels to full power
+        # in one command (55aa030802fffffff4).
+        if rgb is not None and is_pure_white(rgb):
+            self.data[LightState.COLOR_MODE] = ColorMode.RGB
+            self.data[LightState.RGB] = rgb
+            self.data[LightState.BRIGHTNESS] = (
+                255 if brightness is None else brightness
+            )
+            cur_br = int(self.data[LightState.BRIGHTNESS])
+            LOGGER.info("Setting direct white RGB state: brightness=%s", cur_br)
+            await self._client.set_rgb(255, 255, 255, cur_br)
+
+        # Near-white colours still use the separate white LED / temperature
+        # channel, while a chosen temperature is handled by the branch below.
+        elif rgb is not None and is_white_color(rgb):
             self.data[LightState.COLOR_MODE] = ColorMode.COLOR_TEMP
             self.data[LightState.RGB] = (255, 255, 255)
             if brightness is not None:
                 self.data[LightState.BRIGHTNESS] = brightness
-            elif is_pure_white(rgb):
-                # Home Assistant sends only rgb_color when the user taps the
-                # white swatch.  Do not reuse a dim level left by a previous
-                # colour: one tap on white must select bright white.
-                self.data[LightState.BRIGHTNESS] = 255
             cur_br = int(self.data[LightState.BRIGHTNESS])
 
             # Use current color temp level, or default to level 1 (6000K cold white)
