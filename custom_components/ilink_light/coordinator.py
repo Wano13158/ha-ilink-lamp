@@ -180,20 +180,27 @@ class LightCoordinator(DataUpdateCoordinator):
 
         self.data[LightState.POWER] = True
 
-        # The white swatch in HA's RGB picker is an RGB command, not a colour
-        # temperature request.  Sending 0809 here makes some iLink firmware
-        # cycle through its built-in white presets on every tap.  Send the
-        # direct RGB frame instead, which sets all three channels to full power
-        # in one command (55aa030802fffffff4).
-        if rgb is not None and is_pure_white(rgb):
-            self.data[LightState.COLOR_MODE] = ColorMode.RGB
-            self.data[LightState.RGB] = rgb
-            self.data[LightState.BRIGHTNESS] = (
-                255 if brightness is None else brightness
-            )
+        # Home Assistant's white swatches are reported as near-white RGB
+        # values.  They must use the lamp's dedicated white LED channel;
+        # treating them as RGB makes this controller show blue.
+        if rgb is not None and is_white_color(rgb):
+            self.data[LightState.COLOR_MODE] = ColorMode.COLOR_TEMP
+            self.data[LightState.RGB] = (255, 255, 255)
+            if brightness is None:
+                # A colour-temperature selection contains no brightness.  Do
+                # not reuse an unreliable value from the device status: one
+                # tap on a white swatch must produce full brightness.
+                self.data[LightState.BRIGHTNESS] = 255
+            else:
+                self.data[LightState.BRIGHTNESS] = brightness
             cur_br = int(self.data[LightState.BRIGHTNESS])
-            LOGGER.info("Setting direct white RGB state: brightness=%s", cur_br)
-            await self._client.set_rgb(255, 255, 255, cur_br)
+            cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
+            level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
+            self.data[LightState.COLORTEMP] = ColorTempLevelUtil.level_to_color_temp(level)
+
+            LOGGER.info("Setting white LED state: level=%s brightness=%s", level, cur_br)
+            await self._client.set_white_temp(level)
+            await self._client.set_brightness(cur_br)
 
         elif rgb is not None:
             self.data[LightState.COLOR_MODE] = ColorMode.RGB
@@ -210,16 +217,17 @@ class LightCoordinator(DataUpdateCoordinator):
             kelvin = int(colortemp)
             level = ColorTempLevelUtil.color_temp_to_level(kelvin)
             self.data[LightState.COLORTEMP] = ColorTempLevelUtil.level_to_color_temp(level)
-            if brightness is not None:
+            if brightness is None:
+                # HA's colour-temperature swatches carry only a temperature.
+                # Select bright white rather than retaining a stale dim level.
+                self.data[LightState.BRIGHTNESS] = 255
+            else:
                 self.data[LightState.BRIGHTNESS] = brightness
             cur_br = int(self.data[LightState.BRIGHTNESS])
 
-            # 0809 is a preset-cycle command on this controller revision: it
-            # changes the physical light while HA's brightness remains static.
-            # Use the stable direct RGB white frame for the colour-temperature
-            # control until a packet capture contains a non-cycling CCT command.
-            LOGGER.info("Setting stable white state: brightness=%s", cur_br)
-            await self._client.set_rgb(255, 255, 255, cur_br)
+            LOGGER.info("Setting white temp state: level=%s brightness=%s", level, cur_br)
+            await self._client.set_white_temp(level)
+            await self._client.set_brightness(cur_br)
 
         elif scene is not None:
             self.data[LightState.COLOR_MODE] = ColorMode.RGB
@@ -243,7 +251,10 @@ class LightCoordinator(DataUpdateCoordinator):
                 await self._client.set_rgb(cur_rgb[0], cur_rgb[1], cur_rgb[2], cur_br)
             else:
                 cur_br = int(self.data.get(LightState.BRIGHTNESS, 255))
-                await self._client.set_rgb(255, 255, 255, cur_br)
+                cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
+                level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
+                await self._client.set_white_temp(level)
+                await self._client.set_brightness(cur_br)
 
         self.async_set_updated_data(self.data)
         self._set_poll_mode(fast=True)
