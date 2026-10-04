@@ -195,27 +195,6 @@ class LightCoordinator(DataUpdateCoordinator):
             LOGGER.info("Setting direct white RGB state: brightness=%s", cur_br)
             await self._client.set_rgb(255, 255, 255, cur_br)
 
-        # Near-white colours still use the separate white LED / temperature
-        # channel, while a chosen temperature is handled by the branch below.
-        elif rgb is not None and is_white_color(rgb):
-            self.data[LightState.COLOR_MODE] = ColorMode.COLOR_TEMP
-            self.data[LightState.RGB] = (255, 255, 255)
-            if brightness is not None:
-                self.data[LightState.BRIGHTNESS] = brightness
-            cur_br = int(self.data[LightState.BRIGHTNESS])
-
-            # Use current color temp level, or default to level 1 (6000K cold white)
-            cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
-            level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
-            self.data[LightState.COLORTEMP] = ColorTempLevelUtil.level_to_color_temp(level)
-
-            LOGGER.info("Setting White state (from white RGB): level=%s brightness=%s", level, cur_br)
-            # IMPORTANT: send white_temp (0809) to switch lamp to white LED mode,
-            # then immediately send brightness (0801) to set exact level.
-            # Do NOT use turn_on (0805) - that command cycles through presets on each call!
-            await self._client.set_white_temp(level)
-            await self._client.set_brightness(cur_br)
-
         elif rgb is not None:
             self.data[LightState.COLOR_MODE] = ColorMode.RGB
             self.data[LightState.RGB] = rgb
@@ -235,9 +214,12 @@ class LightCoordinator(DataUpdateCoordinator):
                 self.data[LightState.BRIGHTNESS] = brightness
             cur_br = int(self.data[LightState.BRIGHTNESS])
 
-            LOGGER.info("Setting White Temp state: level=%s, brightness=%s", level, cur_br)
-            await self._client.set_white_temp(level)
-            await self._client.set_brightness(cur_br)
+            # 0809 is a preset-cycle command on this controller revision: it
+            # changes the physical light while HA's brightness remains static.
+            # Use the stable direct RGB white frame for the colour-temperature
+            # control until a packet capture contains a non-cycling CCT command.
+            LOGGER.info("Setting stable white state: brightness=%s", cur_br)
+            await self._client.set_rgb(255, 255, 255, cur_br)
 
         elif scene is not None:
             self.data[LightState.COLOR_MODE] = ColorMode.RGB
@@ -260,12 +242,8 @@ class LightCoordinator(DataUpdateCoordinator):
                 cur_br = int(self.data.get(LightState.BRIGHTNESS, 255))
                 await self._client.set_rgb(cur_rgb[0], cur_rgb[1], cur_rgb[2], cur_br)
             else:
-                # Use 0809+0801 to turn on white, NOT 0805 (0805 cycles presets!)
-                cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
-                level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
                 cur_br = int(self.data.get(LightState.BRIGHTNESS, 255))
-                await self._client.set_white_temp(level)
-                await self._client.set_brightness(cur_br)
+                await self._client.set_rgb(255, 255, 255, cur_br)
 
         self.async_set_updated_data(self.data)
         self._set_poll_mode(fast=True)
