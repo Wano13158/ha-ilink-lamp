@@ -14,6 +14,7 @@ from home_assistant_bluetooth import BluetoothServiceInfoBleak
 from homeassistant.components import bluetooth
 
 from .commands import (
+    CHARACTERISTIC_READ_STATUS,
     CHARACTERISTIC_REQUEST_STATUS,
     CHARACTERISTIC_SEND_CMD,
     CHARACTERISTIC_SEND_CMD_NO_RESP,
@@ -48,6 +49,7 @@ class LightBtClient:
         self._address = address
         self._send_command_err_count = 0
         self._callback = callback
+        self._lock = asyncio.Lock()
 
     @property
     def busy(self) -> bool:
@@ -194,15 +196,15 @@ class LightBtClient:
         return self._bt_client is not None and self._bt_client.is_connected
 
     async def _write_uuid(self, uuid: str, val: bytes, response: bool = True) -> None:
-        if self._busy:
-            raise RuntimeError("device busy")
-        try:
+        async with self._lock:
             self._busy = True
-            await self._bt_client.write_gatt_char(
-                char_specifier=uuid, data=val, response=response
-            )
-        finally:
-            self._busy = False
+            try:
+                await self._bt_client.write_gatt_char(
+                    char_specifier=uuid, data=val, response=response
+                )
+                await asyncio.sleep(0.08)
+            finally:
+                self._busy = False
 
     async def _send_payload(self, data: bytes) -> None:
         LOGGER.debug("send payload %s: %s", self._address, data.hex())
@@ -262,7 +264,23 @@ class LightBtClient:
     async def request_status_update(self) -> None:
         self.waiting_status_update = True
         LOGGER.debug("request_status_update %s", self._address)
-        await self._send_command(Commands.status())
+        try:
+            await self._send_command(Commands.status())
+            if self._bt_client and self.is_connected():
+                async with self._lock:
+                    data = await self._bt_client.read_gatt_char(
+                        CHARACTERISTIC_READ_STATUS
+                    )
+                if data and Response.is_status(data):
+                    status = Response.parse_status(data)
+                    LOGGER.info("status received %s: %s", self._address, vars(status))
+                    self._status = status
+                    if self._callback:
+                        await self._callback(status)
+        except Exception as e:
+            LOGGER.debug("Error requesting/reading status from %s: %s", self._address, e)
+        finally:
+            self.waiting_status_update = False
 
     async def set_brightness(self, value: int) -> None:
         if value < 0 or value > 0xFF:

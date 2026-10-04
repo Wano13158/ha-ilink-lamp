@@ -183,17 +183,9 @@ class LightCoordinator(DataUpdateCoordinator):
                 self.data[LightState.BRIGHTNESS] = brightness
             cur_br = int(self.data[LightState.BRIGHTNESS])
 
-            cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
-            level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
-            self.data[LightState.COLORTEMP] = ColorTempLevelUtil.level_to_color_temp(level)
-
-            LOGGER.info(
-                "Setting White Temp state (from white RGB): level=%s, brightness=%s",
-                level,
-                cur_br,
-            )
-            await self._client.set_white_temp(level)
-            await asyncio.sleep(0.03)
+            LOGGER.info("Setting White state (from white RGB): brightness=%s", cur_br)
+            # Switch to white light and apply brightness directly without stepping presets
+            await self._client.turn_on()
             await self._client.set_brightness(cur_br)
 
         elif rgb is not None:
@@ -217,7 +209,6 @@ class LightCoordinator(DataUpdateCoordinator):
 
             LOGGER.info("Setting White Temp state: level=%s, brightness=%s", level, cur_br)
             await self._client.set_white_temp(level)
-            await asyncio.sleep(0.03)
             await self._client.set_brightness(cur_br)
 
         elif scene is not None:
@@ -242,7 +233,6 @@ class LightCoordinator(DataUpdateCoordinator):
                 await self._client.set_rgb(cur_rgb[0], cur_rgb[1], cur_rgb[2], cur_br)
             else:
                 await self._client.turn_on()
-                await asyncio.sleep(0.03)
                 cur_br = int(self.data.get(LightState.BRIGHTNESS, 255))
                 await self._client.set_brightness(cur_br)
 
