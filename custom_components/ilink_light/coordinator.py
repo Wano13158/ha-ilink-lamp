@@ -183,9 +183,16 @@ class LightCoordinator(DataUpdateCoordinator):
                 self.data[LightState.BRIGHTNESS] = brightness
             cur_br = int(self.data[LightState.BRIGHTNESS])
 
-            LOGGER.info("Setting White state (from white RGB): brightness=%s", cur_br)
-            # Switch to white light and apply brightness directly without stepping presets
-            await self._client.turn_on()
+            # Use current color temp level, or default to level 1 (6000K cold white)
+            cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
+            level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
+            self.data[LightState.COLORTEMP] = ColorTempLevelUtil.level_to_color_temp(level)
+
+            LOGGER.info("Setting White state (from white RGB): level=%s brightness=%s", level, cur_br)
+            # IMPORTANT: send white_temp (0809) to switch lamp to white LED mode,
+            # then immediately send brightness (0801) to set exact level.
+            # Do NOT use turn_on (0805) - that command cycles through presets on each call!
+            await self._client.set_white_temp(level)
             await self._client.set_brightness(cur_br)
 
         elif rgb is not None:
@@ -232,8 +239,11 @@ class LightCoordinator(DataUpdateCoordinator):
                 cur_br = int(self.data.get(LightState.BRIGHTNESS, 255))
                 await self._client.set_rgb(cur_rgb[0], cur_rgb[1], cur_rgb[2], cur_br)
             else:
-                await self._client.turn_on()
+                # Use 0809+0801 to turn on white, NOT 0805 (0805 cycles presets!)
+                cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
+                level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
                 cur_br = int(self.data.get(LightState.BRIGHTNESS, 255))
+                await self._client.set_white_temp(level)
                 await self._client.set_brightness(cur_br)
 
         self.async_set_updated_data(self.data)
