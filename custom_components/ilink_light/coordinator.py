@@ -194,12 +194,10 @@ class LightCoordinator(DataUpdateCoordinator):
             else:
                 self.data[LightState.BRIGHTNESS] = brightness
             cur_br = int(self.data[LightState.BRIGHTNESS])
-            cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
-            level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
-            self.data[LightState.COLORTEMP] = ColorTempLevelUtil.level_to_color_temp(level)
-
-            LOGGER.info("Setting white LED state: level=%s brightness=%s", level, cur_br)
-            await self._client.set_white_temp(level)
+            LOGGER.info("Setting direct white state: brightness=%s", cur_br)
+            # On this lamp 0809 advances to the next built-in white preset
+            # instead of selecting its parameter.  0801 switches to white
+            # mode and sets its intensity directly.
             await self._client.set_brightness(cur_br)
 
         elif rgb is not None:
@@ -225,8 +223,7 @@ class LightCoordinator(DataUpdateCoordinator):
                 self.data[LightState.BRIGHTNESS] = brightness
             cur_br = int(self.data[LightState.BRIGHTNESS])
 
-            LOGGER.info("Setting white temp state: level=%s brightness=%s", level, cur_br)
-            await self._client.set_white_temp(level)
+            LOGGER.info("Setting direct white state: brightness=%s", cur_br)
             await self._client.set_brightness(cur_br)
 
         elif scene is not None:
@@ -251,9 +248,6 @@ class LightCoordinator(DataUpdateCoordinator):
                 await self._client.set_rgb(cur_rgb[0], cur_rgb[1], cur_rgb[2], cur_br)
             else:
                 cur_br = int(self.data.get(LightState.BRIGHTNESS, 255))
-                cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
-                level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
-                await self._client.set_white_temp(level)
                 await self._client.set_brightness(cur_br)
 
         self.async_set_updated_data(self.data)
