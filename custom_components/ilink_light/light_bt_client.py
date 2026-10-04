@@ -203,7 +203,6 @@ class LightBtClient:
             )
         finally:
             self._busy = False
-            await self.disconnect(only_if_needed=True)
 
     async def _send_payload(self, data: bytes) -> None:
         LOGGER.debug("send payload %s: %s", self._address, data.hex())
@@ -286,13 +285,15 @@ class LightBtClient:
             raise ValueError("Brightness must be between 0 and 255")
 
         LOGGER.debug("set_rgb: %s %s %s brightness: %s", r, g, b, brightness)
-        # 1) Send btsnoop command from working Android APK log: [0x55, r, g, b, brightness, 0xFF, 0xF0]
-        btsnoop_cmd = Commands.rgb_btsnoop(r, g, b, brightness)
-        # 2) Also send 55aa framing command: 55aa030802[r][g][b][crc]
-        std_rgb_cmd = bytes.fromhex(Commands.rgb(r, g, b))
+        # Scale RGB proportionally by brightness
+        if brightness == 0:
+            r_val, g_val, b_val = 0, 0, 0
+        else:
+            r_val = max(1 if r > 0 else 0, round(r * brightness / 255))
+            g_val = max(1 if g > 0 else 0, round(g * brightness / 255))
+            b_val = max(1 if b > 0 else 0, round(b * brightness / 255))
 
-        await self._send_payload(btsnoop_cmd)
-        await asyncio.sleep(0.02)
+        std_rgb_cmd = bytes.fromhex(Commands.rgb(r_val, g_val, b_val))
         await self._send_payload(std_rgb_cmd)
 
     async def set_scene(self, value: int) -> None:
@@ -308,8 +309,4 @@ class LightBtClient:
 
     async def turn_off(self) -> None:
         LOGGER.debug("turn_off")
-        # Send standard 55aa off command
         await self._send_command(Commands.off())
-        await asyncio.sleep(0.02)
-        # Also send btsnoop off packet
-        await self._send_payload(Commands.off_btsnoop())

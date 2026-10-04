@@ -40,6 +40,8 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 
 class iLinkLightEntity(iLinkLightBaseEntity, LightEntity):
+    _attr_min_color_temp_kelvin = 3000
+    _attr_max_color_temp_kelvin = 6000
     min_color_temp_kelvin = 3000
     max_color_temp_kelvin = 6000
 

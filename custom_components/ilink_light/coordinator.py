@@ -32,6 +32,18 @@ class LightState(StrEnum):
     COLOR_MODE = "color_mode"
 
 
+def is_white_color(rgb: tuple[int, int, int]) -> bool:
+    """Determine if RGB value corresponds to white."""
+    r, g, b = rgb
+    if r == g == b:
+        return True
+    max_c = max(r, g, b)
+    min_c = min(r, g, b)
+    if max_c >= 220 and (max_c - min_c) <= 20:
+        return True
+    return False
+
+
 class LightCoordinator(DataUpdateCoordinator):
     _fast_poll_count = 0
     _normal_poll_interval = 60
@@ -71,6 +83,11 @@ class LightCoordinator(DataUpdateCoordinator):
             self.data[LightState.COLORTEMP] = ColorTempLevelUtil.level_to_color_temp(
                 status.temp_level
             )
+            self.data[LightState.COLOR_MODE] = ColorMode.COLOR_TEMP
+        elif status.rgb != (0, 0, 0):
+            self.data[LightState.COLOR_MODE] = ColorMode.RGB
+            self.data[LightState.RGB] = status.rgb
+
         self.data[LightState.BRIGHTNESS] = status.brightness
         self.data[LightState.POWER] = status.on
         if status.rgb != (0, 0, 0) and status.rgb != (255, 255, 255):
@@ -158,7 +175,28 @@ class LightCoordinator(DataUpdateCoordinator):
 
         self.data[LightState.POWER] = True
 
-        if rgb is not None:
+        # Check if user requested white via RGB color picker
+        if rgb is not None and is_white_color(rgb):
+            self.data[LightState.COLOR_MODE] = ColorMode.COLOR_TEMP
+            self.data[LightState.RGB] = (255, 255, 255)
+            if brightness is not None:
+                self.data[LightState.BRIGHTNESS] = brightness
+            cur_br = int(self.data[LightState.BRIGHTNESS])
+
+            cur_kelvin = self.data.get(LightState.COLORTEMP, 6000)
+            level = ColorTempLevelUtil.color_temp_to_level(cur_kelvin)
+            self.data[LightState.COLORTEMP] = ColorTempLevelUtil.level_to_color_temp(level)
+
+            LOGGER.info(
+                "Setting White Temp state (from white RGB): level=%s, brightness=%s",
+                level,
+                cur_br,
+            )
+            await self._client.set_white_temp(level)
+            await asyncio.sleep(0.03)
+            await self._client.set_brightness(cur_br)
+
+        elif rgb is not None:
             self.data[LightState.COLOR_MODE] = ColorMode.RGB
             self.data[LightState.RGB] = rgb
             if brightness is not None:
@@ -190,8 +228,8 @@ class LightCoordinator(DataUpdateCoordinator):
             self.data[LightState.BRIGHTNESS] = brightness
             cur_br = int(brightness)
             if self.data.get(LightState.COLOR_MODE) == ColorMode.RGB:
-                cur_rgb = self.data.get(LightState.RGB, (255, 255, 255))
-                LOGGER.info("Adjusting RGB brightness: %s", cur_br)
+                cur_rgb = self.data.get(LightState.RGB, (0, 0, 255))
+                LOGGER.info("Adjusting RGB brightness: %s (color: %s)", cur_br, cur_rgb)
                 await self._client.set_rgb(cur_rgb[0], cur_rgb[1], cur_rgb[2], cur_br)
             else:
                 LOGGER.info("Adjusting White brightness: %s", cur_br)
@@ -199,13 +237,14 @@ class LightCoordinator(DataUpdateCoordinator):
 
         else:
             if self.data.get(LightState.COLOR_MODE) == ColorMode.RGB:
-                cur_rgb = self.data.get(LightState.RGB, (255, 255, 255))
+                cur_rgb = self.data.get(LightState.RGB, (0, 0, 255))
                 cur_br = int(self.data.get(LightState.BRIGHTNESS, 255))
                 await self._client.set_rgb(cur_rgb[0], cur_rgb[1], cur_rgb[2], cur_br)
             else:
                 await self._client.turn_on()
                 await asyncio.sleep(0.03)
-                await self._client.set_brightness(int(self.data[LightState.BRIGHTNESS]))
+                cur_br = int(self.data.get(LightState.BRIGHTNESS, 255))
+                await self._client.set_brightness(cur_br)
 
         self.async_set_updated_data(self.data)
         self._set_poll_mode(fast=True)

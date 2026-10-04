@@ -38,20 +38,19 @@ class Scenes:
 
 class ColorTempLevelUtil:
     @staticmethod
-    def color_temp_to_level(temp: int):
+    def color_temp_to_level(temp: int) -> int:
         if temp > 6000:
             temp = 6000
         elif temp < 3000:
             temp = 3000
 
-        for key, value in color_temp_mappings.items():
-            if temp >= value:
-                return key
-
-        return 3
+        return min(
+            color_temp_mappings.keys(),
+            key=lambda k: abs(color_temp_mappings[k] - temp),
+        )
 
     @staticmethod
-    def level_to_color_temp(level: int):
+    def level_to_color_temp(level: int) -> int:
         if level > 5:
             level = 5
         elif level < 1:
@@ -126,8 +125,8 @@ class Commands:
         """brightness command for white mode from 0 to 255"""
         if value > 0xFF:
             value = 0xFF
-        elif value < 1:
-            value = 1
+        elif value < 0:
+            value = 0
 
         return Commands._std(Commands._cmd_dim, f"{value:02x}")
 
