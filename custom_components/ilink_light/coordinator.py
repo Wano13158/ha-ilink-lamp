@@ -44,6 +44,11 @@ def is_white_color(rgb: tuple[int, int, int]) -> bool:
     return False
 
 
+def is_pure_white(rgb: tuple[int, int, int]) -> bool:
+    """Return whether a color-picker selection is the white swatch."""
+    return rgb == (255, 255, 255)
+
+
 class LightCoordinator(DataUpdateCoordinator):
     _fast_poll_count = 0
     _normal_poll_interval = 60
@@ -181,6 +186,11 @@ class LightCoordinator(DataUpdateCoordinator):
             self.data[LightState.RGB] = (255, 255, 255)
             if brightness is not None:
                 self.data[LightState.BRIGHTNESS] = brightness
+            elif is_pure_white(rgb):
+                # Home Assistant sends only rgb_color when the user taps the
+                # white swatch.  Do not reuse a dim level left by a previous
+                # colour: one tap on white must select bright white.
+                self.data[LightState.BRIGHTNESS] = 255
             cur_br = int(self.data[LightState.BRIGHTNESS])
 
             # Use current color temp level, or default to level 1 (6000K cold white)
